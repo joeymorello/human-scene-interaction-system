@@ -1,0 +1,43 @@
+# HSI ML Pipeline Configuration
+pipeline:
+  device: "cuda"
+  output_dir: "../data/results"
+
+josh:
+  vendor_path: "./vendor/JOSH"
+  # Output formats
+  export_ply: true
+  export_smpl_npz: true
+  export_camera: true
+  export_contacts: true
+
+sam3:
+  vendor_path: "./vendor/sam3"
+  model_type: "default"
+  # Point prompt settings
+  num_points_per_contact: 1
+  multimask_output: false
+
+clip:
+  model_name: "openai/clip-vit-base-patch32"
+  # Default labels for zero-shot classification
+  candidate_labels:
+    - "wall"
+    - "floor"
+    - "table"
+    - "chair"
+    - "desk"
+    - "box"
+    - "shelf"
+    - "door"
+    - "window"
+    - "couch"
+    - "bed"
+    - "monitor"
+    - "keyboard"
+    - "person"
+
+smplx:
+  model_path: "../models/smplx/SMPLX_NEUTRAL.npz"
+  gender: "neutral"
+  num_betas: 10
