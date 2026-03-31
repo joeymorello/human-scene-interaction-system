@@ -12,19 +12,24 @@ Takes an .mp4 video and produces:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-from pipeline.josh_runner import JOSHRunner
-from pipeline.contact_projector import ContactProjector
-from pipeline.sam3_segmentor import SAM3Segmentor
-from pipeline.clip_labeler import CLIPLabeler
 
-
-def run_pipeline(video_path: str, output_dir: str, config_path: str = None):
+def run_pipeline(video_path: str, output_dir: str, config_path: str = None,
+                 device: str = "cuda"):
     """Run the full HSI pipeline on a video file."""
-    video_path = Path(video_path)
-    output_dir = Path(output_dir)
+    # Ensure headless rendering works
+    os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+
+    from pipeline.josh_runner import JOSHRunner
+    from pipeline.contact_projector import ContactProjector
+    from pipeline.sam3_segmentor import SAM3Segmentor
+    from pipeline.clip_labeler import CLIPLabeler
+
+    video_path = Path(video_path).resolve()
+    output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not video_path.exists():
@@ -37,7 +42,7 @@ def run_pipeline(video_path: str, output_dir: str, config_path: str = None):
 
     # Stage 1: JOSH — 4D Human-Scene Reconstruction
     print("\n[1/4] Running JOSH reconstruction...")
-    josh = JOSHRunner(config_path=config_path)
+    josh = JOSHRunner(config_path=config_path, device=device)
     josh_output = josh.run(video_path, output_dir / "josh")
     print(f"  → Scene point cloud: {josh_output.ply_path}")
     print(f"  → SMPL sequence: {len(josh_output.smpl_frames)} frames")
@@ -52,7 +57,9 @@ def run_pipeline(video_path: str, output_dir: str, config_path: str = None):
     # Stage 3: SAM3 — Segment touched objects
     print("\n[3/4] Running SAM3 segmentation on contact regions...")
     segmentor = SAM3Segmentor(config_path=config_path)
-    masks = segmentor.segment_from_points(video_path, contacts_2d)
+    masks = segmentor.segment_from_points(
+        video_path, contacts_2d, output_dir=output_dir / "sam3_work"
+    )
     print(f"  → {len(masks)} object masks generated")
 
     # Stage 4: CLIP — Label segmented objects
@@ -77,9 +84,11 @@ def main():
                         help="Output directory (default: ../data/results)")
     parser.add_argument("--config", "-c", type=str, default=None,
                         help="Path to config YAML (default: configs/default.yaml)")
+    parser.add_argument("--device", "-d", type=str, default="cuda",
+                        help="Device for inference (default: cuda)")
     args = parser.parse_args()
 
-    run_pipeline(args.video, args.output, args.config)
+    run_pipeline(args.video, args.output, args.config, args.device)
 
 
 if __name__ == "__main__":
