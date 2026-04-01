@@ -3,7 +3,15 @@
 import { useState, useRef, useCallback } from "react";
 import UploadPanel from "@/components/ui/UploadPanel";
 import VideoPanel from "@/components/ui/VideoPanel";
-import SceneCanvas from "@/components/three/SceneCanvas";
+import dynamic from "next/dynamic";
+const SceneCanvas = dynamic(() => import("@/components/three/SceneCanvas"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-gray-500">
+      Loading 3D viewer...
+    </div>
+  ),
+});
 import EventLog from "@/components/ui/EventLog";
 
 export type JobResult = {
@@ -53,6 +61,17 @@ export default function Home() {
     };
   }, []);
 
+  const loadTestResults = useCallback(() => {
+    fetch("/api/results/test_run")
+      .then((r) => r.json())
+      .then((data) => {
+        console.log("Loaded test results:", data);
+        setJobId("test_run");
+        setResult(data);
+      })
+      .catch((err) => console.error("Failed to load test results:", err));
+  }, []);
+
   const handleTimeUpdate = useCallback(() => {
     if (videoRef.current) {
       setCurrentTime(videoRef.current.currentTime);
@@ -62,11 +81,17 @@ export default function Home() {
   // Upload view
   if (!result) {
     return (
-      <main className="flex min-h-screen items-center justify-center p-8">
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
         <UploadPanel
           onUploadComplete={handleUploadComplete}
           statusMessages={statusMessages}
         />
+        <button
+          onClick={loadTestResults}
+          className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-400 hover:border-gray-500 hover:text-gray-200"
+        >
+          Load Test Results
+        </button>
       </main>
     );
   }
@@ -96,8 +121,9 @@ export default function Home() {
         <div className="flex-1">
           <SceneCanvas
             plyUrl={result.ply_url ? `/api${result.ply_url}` : null}
-            smplUrls={result.smpl_urls.map((u) => `/api${u}`)}
+            jobId={result.job_id}
             currentTime={currentTime}
+            fps={60}
           />
         </div>
       </div>

@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routers import upload, results, stream
+from .routers import upload, results, stream, screenshot
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
@@ -34,6 +34,7 @@ app.mount("/static/uploads", StaticFiles(directory=str(DATA_DIR / "uploads")), n
 app.include_router(upload.router)
 app.include_router(results.router)
 app.include_router(stream.router)
+app.include_router(screenshot.router)
 
 
 @app.get("/health")

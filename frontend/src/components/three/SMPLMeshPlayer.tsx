@@ -4,59 +4,81 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 type SMPLMeshPlayerProps = {
-  urls: string[];
+  jobId: string;
   currentTime: number;
   fps?: number;
 };
 
-type SMPLFrame = {
-  vertices: Float32Array;
+type SMPLData = {
   faces: Uint32Array;
+  frames: Float32Array[]; // each is V*3 floats
+  numVerts: number;
 };
 
 export default function SMPLMeshPlayer({
-  urls,
+  jobId,
   currentTime,
   fps = 30,
 }: SMPLMeshPlayerProps) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const [frames, setFrames] = useState<SMPLFrame[]>([]);
+  const [data, setData] = useState<SMPLData | null>(null);
 
-  // Load all SMPL .npz frames
+  // Load binary SMPL data
   useEffect(() => {
-    if (urls.length === 0) return;
+    if (!jobId) return;
 
-    // TODO: Load .npz files — requires a browser-side NPZ parser
-    // For now, frames are loaded as binary ArrayBuffers and parsed
-    // Format expected: { vertices: Float32Array(V*3), faces: Uint32Array(F*3) }
-    //
-    // In production, the backend should convert .npz to a browser-friendly
-    // format (e.g., GLB or a flat binary with a header).
-    console.log(`SMPLMeshPlayer: ${urls.length} frames to load`);
-  }, [urls]);
+    fetch(`/api/results/${jobId}/smpl.bin`)
+      .then((r) => r.arrayBuffer())
+      .then((buf) => {
+        const view = new DataView(buf);
+        const numFrames = view.getUint32(0, true);
+        const numVerts = view.getUint32(4, true);
+        const numFaces = view.getUint32(8, true);
+
+        const headerSize = 12;
+        const facesSize = numFaces * 3 * 4;
+        const faces = new Uint32Array(buf, headerSize, numFaces * 3);
+
+        const vertSize = numVerts * 3 * 4;
+        const framesStart = headerSize + facesSize;
+        const frames: Float32Array[] = [];
+        for (let i = 0; i < numFrames; i++) {
+          const offset = framesStart + i * vertSize;
+          frames.push(new Float32Array(buf, offset, numVerts * 3));
+        }
+
+        console.log(
+          `SMPLMeshPlayer: loaded ${numFrames} frames, ${numVerts} verts, ${numFaces} faces`
+        );
+        setData({ faces, frames, numVerts });
+      })
+      .catch((err) => console.error("Failed to load SMPL data:", err));
+  }, [jobId]);
 
   // Select frame based on currentTime
   const frameIndex = useMemo(() => {
-    if (frames.length === 0) return -1;
+    if (!data || data.frames.length === 0) return -1;
     const idx = Math.floor(currentTime * fps);
-    return Math.min(idx, frames.length - 1);
-  }, [currentTime, fps, frames.length]);
+    return Math.max(0, Math.min(idx, data.frames.length - 1));
+  }, [currentTime, fps, data]);
 
   // Update mesh geometry when frame changes
   useEffect(() => {
-    if (frameIndex < 0 || !meshRef.current || frames.length === 0) return;
+    if (frameIndex < 0 || !meshRef.current || !data) return;
 
-    const frame = frames[frameIndex];
     const geo = meshRef.current.geometry;
-
     geo.setAttribute(
       "position",
-      new THREE.BufferAttribute(frame.vertices, 3)
+      new THREE.BufferAttribute(data.frames[frameIndex], 3)
     );
-    geo.setIndex(new THREE.BufferAttribute(frame.faces, 1));
+    if (!geo.index) {
+      geo.setIndex(new THREE.BufferAttribute(data.faces, 1));
+    }
     geo.computeVertexNormals();
     geo.attributes.position.needsUpdate = true;
-  }, [frameIndex, frames]);
+  }, [frameIndex, data]);
+
+  if (!data) return null;
 
   return (
     <mesh ref={meshRef}>
