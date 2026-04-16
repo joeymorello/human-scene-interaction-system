@@ -15,7 +15,6 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from glob import glob
 from pathlib import Path
 from typing import Optional
@@ -23,17 +22,7 @@ from typing import Optional
 import numpy as np
 import trimesh
 
-
-@dataclass
-class JOSHOutput:
-    """Output from JOSH reconstruction."""
-    ply_path: Path
-    smpl_frames: list[Path]
-    camera_intrinsics: np.ndarray  # (3, 3)
-    camera_extrinsics: np.ndarray  # (N, 4, 4) per frame
-    contacts_3d: list[dict]  # [{"frame": int, "points": np.ndarray (M, 3)}]
-    frame_indices: list[int] = field(default_factory=list)
-    fps: float = 30.0
+from .types import JOSHOutput
 
 
 def _setup_josh_paths():

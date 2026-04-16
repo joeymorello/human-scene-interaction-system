@@ -3,6 +3,8 @@ Upload endpoint — receives video files and triggers the ML pipeline.
 """
 
 import asyncio
+import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -12,9 +14,16 @@ from .stream import job_status_store, publish_status
 
 router = APIRouter()
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+DATA_DIR = REPO_ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 RESULTS_DIR = DATA_DIR / "results"
+ML_PIPELINE_DIR = REPO_ROOT / "ml-pipeline"
+
+# Default runner — "josh3r" (fast feed-forward) or "josh" (optimization). Users
+# can override via env var when starting uvicorn.
+DEFAULT_RUNNER = os.environ.get("HSI_RUNNER", "josh3r")
+DEFAULT_DEVICE = os.environ.get("HSI_DEVICE", "cuda")
 
 
 @router.post("/upload")
@@ -56,32 +65,51 @@ async def upload_video(file: UploadFile = File(...)):
     }
 
 
+def _invoke_pipeline(video_path: Path, output_dir: Path, runner: str, device: str):
+    """
+    Synchronous pipeline entry point, run in a threadpool from the async router.
+
+    Kept at module scope so it's picklable / unit-testable and so the heavy
+    imports (torch, trimesh, open3d) happen on the worker thread — not at
+    backend startup.
+    """
+    sys.path.insert(0, str(ML_PIPELINE_DIR))
+    from scripts.run_pipeline import run_pipeline
+
+    return run_pipeline(
+        video_path=str(video_path),
+        output_dir=str(output_dir),
+        device=device,
+        runner=runner,
+    )
+
+
 async def _run_pipeline(job_id: str, video_path: Path):
-    """Run the ML pipeline asynchronously."""
+    """Run the ML pipeline asynchronously in a worker thread."""
     output_dir = RESULTS_DIR / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    runner = DEFAULT_RUNNER
+    device = DEFAULT_DEVICE
 
     try:
-        await publish_status(job_id, "processing", "Extracting video frames...")
+        await publish_status(
+            job_id, "processing",
+            f"Starting {runner.upper()} pipeline on {video_path.name}...",
+        )
 
-        # Stage 1: JOSH Reconstruction
-        await publish_status(job_id, "processing", "Running JOSH 4D reconstruction...")
-        # TODO: Call josh_runner.run() in a thread pool
-        # josh_output = await asyncio.to_thread(josh.run, video_path, output_dir / "josh")
-        await asyncio.sleep(0.1)  # Placeholder
+        interactions = await asyncio.to_thread(
+            _invoke_pipeline, video_path, output_dir, runner, device,
+        )
 
-        # Stage 2: Contact Projection
-        await publish_status(job_id, "processing", "Projecting 3D contacts to 2D...")
-        await asyncio.sleep(0.1)
-
-        # Stage 3: SAM3 Segmentation
-        await publish_status(job_id, "processing", "Running SAM3 segmentation...")
-        await asyncio.sleep(0.1)
-
-        # Stage 4: CLIP Labeling
-        await publish_status(job_id, "processing", "Labeling objects with CLIP...")
-        await asyncio.sleep(0.1)
-
-        await publish_status(job_id, "completed", "Pipeline finished successfully.")
+        await publish_status(
+            job_id, "completed",
+            f"Pipeline finished with {len(interactions)} interaction events.",
+        )
 
     except Exception as e:
-        await publish_status(job_id, "error", f"Pipeline failed: {str(e)}")
+        # Surface the error class + message so the UI can show useful info.
+        await publish_status(
+            job_id, "error",
+            f"Pipeline failed: {type(e).__name__}: {e}",
+        )

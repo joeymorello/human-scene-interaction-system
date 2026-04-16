@@ -2,6 +2,10 @@
 pipeline:
   device: "cuda"
   output_dir: "../data/results"
+  # Reconstruction backend:
+  #   josh3r  — feed-forward, fast, real-time friendly (default)
+  #   josh    — optimization-based, slower, better scene geometry
+  runner: "josh3r"
 
 josh:
   vendor_path: "./vendor/JOSH"
@@ -10,6 +14,17 @@ josh:
   export_smpl_npz: true
   export_camera: true
   export_contacts: true
+
+josh3r:
+  # Path to the JOSH3R checkpoint (download from the JOSH repo's Google Drive
+  # link — see README). Can also be overridden via the HSI_JOSH3R_CKPT env var.
+  ckpt_path: ""
+  # SMPL neutral body model dir (JOSH3R uses smplx.SMPL loader, same layout as
+  # the JOSH demo). Override with HSI_JOSH3R_SMPL_DIR.
+  smpl_dir: "./vendor/JOSH/data/smpl"
+  # Post-hoc contact threshold (metres). SMPL vertices closer than this to any
+  # scene point are treated as in contact.
+  contact_eps_meters: 0.03
 
 sam3:
   vendor_path: "./vendor/sam3"

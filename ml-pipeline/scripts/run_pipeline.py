@@ -2,12 +2,16 @@
 HSI ML Pipeline — Main entry point.
 
 Takes an .mp4 video and produces:
-1. A .ply point cloud of the scene (from JOSH)
-2. A sequence of .npz files for SMPL human mesh (from JOSH)
-3. Camera extrinsics/intrinsics (from JOSH)
-4. 3D contact coordinates (human-scene intersections from JOSH)
+1. A .ply point cloud of the scene (from JOSH / JOSH3R)
+2. A sequence of .npz files for SMPL human mesh (from JOSH / JOSH3R)
+3. Camera extrinsics/intrinsics
+4. 3D contact coordinates (from JOSH+DECO, or from SMPL↔scene proximity for JOSH3R)
 5. SAM3 segmentation masks of touched objects (via 2D projected contact points)
 6. CLIP labels for each segmented object
+
+Runner choice:
+  --runner josh3r   (default)  end-to-end, fast, global-trajectory accurate
+  --runner josh                base JOSH with optimization, slower, better scene geometry
 """
 
 import argparse
@@ -17,13 +21,26 @@ import sys
 from pathlib import Path
 
 
-def run_pipeline(video_path: str, output_dir: str, config_path: str = None,
-                 device: str = "cuda"):
+def _build_runner(runner: str, config_path, device: str):
+    if runner == "josh3r":
+        from pipeline.josh3r_runner import JOSH3RRunner
+        return JOSH3RRunner(device=device)
+    if runner == "josh":
+        from pipeline.josh_runner import JOSHRunner
+        return JOSHRunner(config_path=config_path, device=device)
+    raise ValueError(f"Unknown runner: {runner!r} (expected 'josh3r' or 'josh')")
+
+
+def run_pipeline(
+    video_path: str,
+    output_dir: str,
+    config_path: str = None,
+    device: str = "cuda",
+    runner: str = "josh3r",
+):
     """Run the full HSI pipeline on a video file."""
-    # Ensure headless rendering works
     os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
-    from pipeline.josh_runner import JOSHRunner
     from pipeline.contact_projector import ContactProjector
     from pipeline.sam3_segmentor import SAM3Segmentor
     from pipeline.clip_labeler import CLIPLabeler
@@ -36,14 +53,14 @@ def run_pipeline(video_path: str, output_dir: str, config_path: str = None,
         print(f"Error: Video file not found: {video_path}")
         sys.exit(1)
 
-    print(f"=== HSI Pipeline ===")
+    print(f"=== HSI Pipeline ({runner}) ===")
     print(f"Input:  {video_path}")
     print(f"Output: {output_dir}")
 
-    # Stage 1: JOSH — 4D Human-Scene Reconstruction
-    print("\n[1/4] Running JOSH reconstruction...")
-    josh = JOSHRunner(config_path=config_path, device=device)
-    josh_output = josh.run(video_path, output_dir / "josh")
+    # Stage 1: Reconstruction — trajectory + scene + SMPL meshes
+    print(f"\n[1/4] Running {runner.upper()} reconstruction...")
+    recon = _build_runner(runner, config_path, device)
+    josh_output = recon.run(video_path, output_dir / runner)
     print(f"  → Scene point cloud: {josh_output.ply_path}")
     print(f"  → SMPL sequence: {len(josh_output.smpl_frames)} frames")
     print(f"  → Contact points: {len(josh_output.contacts_3d)} events")
@@ -86,9 +103,12 @@ def main():
                         help="Path to config YAML (default: configs/default.yaml)")
     parser.add_argument("--device", "-d", type=str, default="cuda",
                         help="Device for inference (default: cuda)")
+    parser.add_argument("--runner", "-r", type=str, default="josh3r",
+                        choices=["josh3r", "josh"],
+                        help="Reconstruction backend (default: josh3r — fast feed-forward)")
     args = parser.parse_args()
 
-    run_pipeline(args.video, args.output, args.config, args.device)
+    run_pipeline(args.video, args.output, args.config, args.device, args.runner)
 
 
 if __name__ == "__main__":
